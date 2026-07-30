@@ -1,0 +1,32 @@
+selfapp has been deployed to namespace: {{ .Release.Namespace }}
+
+Check that everything came up:
+  kubectl get pods -n {{ .Release.Namespace }}
+
+{{- if .Values.ingress.enabled }}
+
+Ingress is enabled for host: {{ .Values.ingress.host }}
+Make sure that hostname resolves to Minikube's IP:
+
+  echo "$(minikube ip) {{ .Values.ingress.host }}" | sudo tee -a /etc/hosts
+
+Then visit:
+  http://{{ .Values.ingress.host }}
+{{- else }}
+
+Ingress is disabled. Reach the web service directly, e.g.:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "selfapp.fullname" . }}-web 8080:80
+  # then open http://localhost:8080
+{{- end }}
+
+Login (Spring Security in-memory users, same as docker-buildlab-selfapp):
+  admin_self / admin_self  (ADMIN)
+  test_self   / test_self  (USER)
+
+To uninstall:
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+  # Note: this does NOT delete the MySQL PVC by default (PVCs outlive
+  # their release on purpose, to avoid an accidental `helm uninstall`
+  # from destroying your data). Delete it explicitly if you actually want
+  # a clean slate:
+  #   kubectl delete pvc {{ include "selfapp.fullname" . }}-mysql-pvc -n {{ .Release.Namespace }}

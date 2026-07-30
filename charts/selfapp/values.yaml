@@ -1,0 +1,120 @@
+# Default values for the selfapp chart.
+# environment-specific overrides live in values-dev.yaml / values-prod.yaml,
+# e.g.: helm install selfapp . -f values.yaml -f values-dev.yaml
+
+# -----------------------------------------------------------------------
+# Image names — confirmed against the real docker-compose.yml
+# -----------------------------------------------------------------------
+# selfapp builds/pushes as   ${DOCKERHUB_USER}/selfapp-lite:v1
+# selfweb builds/pushes as   ${DOCKERHUB_USER}/selfapp-lite-web:v1
+# Point repository at your own Docker Hub account, or build straight into
+# Minikube's own Docker daemon with `eval $(minikube docker-env)` and use
+# `pullPolicy: Never` (see values-dev.yaml).
+
+app:
+  image:
+    repository: CHANGE_ME/selfapp-lite
+    tag: v1
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  containerPort: 8080 # confirmed via app/Dockerfile's EXPOSE 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+web:
+  image:
+    # Confirmed against docker-compose.yml: the selfweb service publishes
+    # as ${DOCKERHUB_USER}/selfapp-lite-web:v1, not "selfapp-web" as an
+    # earlier draft of this chart guessed.
+    repository: CHANGE_ME/selfapp-lite-web
+    tag: v1
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  containerPort: 80 # confirmed via web/Dockerfile's EXPOSE 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+mysql:
+  image:
+    repository: mysql
+    tag: "8.0"
+    pullPolicy: IfNotPresent
+  # NOTE: values below are placeholders. Override via
+  # --set mysql.rootPassword=... or, better, via a pre-created Secret
+  # (see README "Secrets" section) rather than committing real values
+  # to a tracked values file.
+  rootPassword: CHANGE_ME
+  database: selfapplite
+  username: selfuser
+  password: CHANGE_ME
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: standard # Minikube's default StorageClass
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------
+# Memcached and RabbitMQ — scaffolded but disabled by default.
+# -----------------------------------------------------------------------
+# This mirrors docker-buildlab-selfapp's own docker-compose.yml, which
+# defines selfcache (Memcached) and selfmq (RabbitMQ) as services the app
+# does NOT yet connect to. Templates exist so you can flip these on as an
+# exercise (see docker-buildlab-selfapp's README "Optional exercises"),
+# but there is no real integration to test yet if you enable them.
+
+memcached:
+  enabled: false
+  image:
+    repository: memcached
+    tag: "1.6"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+rabbitmq:
+  enabled: false
+  image:
+    repository: rabbitmq
+    tag: "3.13-management"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+# -----------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx # the Minikube ingress addon registers this class
+  host: selfapp.local
+  annotations: {}
+
+# -----------------------------------------------------------------------
+# Service types
+# -----------------------------------------------------------------------
+service:
+  webType: ClusterIP # exposed via Ingress; use NodePort if you skip Ingress

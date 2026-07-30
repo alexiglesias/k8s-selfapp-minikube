@@ -1,0 +1,40 @@
+# Dev overrides: helm install selfapp . -f values.yaml -f values-dev.yaml -n selfapp-dev
+
+app:
+  image:
+    # Build straight into Minikube's own Docker daemon and skip a registry
+    # entirely for local dev:
+    #   eval $(minikube docker-env)
+    #   docker build -t selfapp-lite:dev ../../../docker-buildlab-selfapp/app
+    repository: selfapp-lite
+    tag: dev
+    pullPolicy: Never
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+web:
+  image:
+    repository: selfapp-lite-web
+    tag: dev
+    pullPolicy: Never
+  replicaCount: 1
+
+mysql:
+  persistence:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
+ingress:
+  host: selfapp.dev.local

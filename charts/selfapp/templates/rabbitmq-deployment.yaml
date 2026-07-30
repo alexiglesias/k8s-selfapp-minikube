@@ -1,0 +1,36 @@
+# Scaffolded, matching docker-buildlab-selfapp's own docker-compose.yml
+# (a "selfmq" service the app doesn't connect to yet). Disabled by default
+# (rabbitmq.enabled: false) — same caveat as memcached-deployment.yaml.
+{{- if .Values.rabbitmq.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "selfapp.fullname" . }}-rabbitmq
+  labels:
+    {{- include "selfapp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rabbitmq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "selfapp.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "selfapp.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
+          ports:
+            - containerPort: 5672
+              name: amqp
+            - containerPort: 15672
+              name: management
+          resources:
+            {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+{{- end }}

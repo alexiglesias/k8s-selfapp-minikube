@@ -1,0 +1,17 @@
+# Non-secret app configuration, confirmed against the real
+# docker-buildlab-selfapp docker-compose.yml (selfapp service): the app
+# reads DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASS directly, not
+# Spring Boot's spring.datasource.* convention — my earlier draft assumed
+# the latter and was wrong, this is the corrected version.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "selfapp.fullname" . }}-app-config
+  labels:
+    {{- include "selfapp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+data:
+  DB_HOST: {{ printf "%s-mysql" (include "selfapp.fullname" .) | quote }}
+  DB_PORT: "3306"
+  DB_NAME: {{ .Values.mysql.database | quote }}
+  DB_USER: {{ .Values.mysql.username | quote }}

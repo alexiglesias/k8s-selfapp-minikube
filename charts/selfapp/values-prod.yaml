@@ -1,0 +1,39 @@
+# "Prod" overrides — still a local Minikube cluster, but pinned image tags
+# and slightly higher replica counts/resources to practice a more
+# production-shaped configuration.
+# helm install selfapp . -f values.yaml -f values-prod.yaml -n selfapp-prod
+
+app:
+  image:
+    repository: CHANGE_ME/selfapp-lite
+    tag: v1 # pin to an explicit, published tag — never :latest in "prod"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 150m
+      memory: 320Mi
+    limits:
+      cpu: 600m
+      memory: 640Mi
+
+web:
+  image:
+    repository: CHANGE_ME/selfapp-lite-web
+    tag: v1
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+
+mysql:
+  persistence:
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 150m
+      memory: 320Mi
+    limits:
+      cpu: 600m
+      memory: 640Mi
+
+ingress:
+  host: selfapp.local

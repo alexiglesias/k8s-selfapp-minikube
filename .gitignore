@@ -1,0 +1,12 @@
+# Helm
+charts/selfapp/charts/
+charts/selfapp/Chart.lock
+
+# Never commit real secrets — use --set or a separate, gitignored
+# values-secrets.yaml passed with an extra -f flag instead.
+values-secrets.yaml
+*.secrets.yaml
+
+# OS / editor noise
+.DS_Store
+.vscode/

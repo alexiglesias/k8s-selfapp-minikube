@@ -1,0 +1,45 @@
+# Reverse proxy config, aligned with the real web/selfapp.conf —
+# same upstream/server_name/proxy_set_header structure, just with the
+# container name (selfapp:8080 in the original, Docker Compose only)
+# replaced by this chart's in-cluster Service DNS name.
+#
+# Confirmed against the real web/Dockerfile: it does
+# `COPY selfapp.conf /etc/nginx/conf.d/default.conf`, so this ConfigMap's
+# content is meant to fully REPLACE default.conf, not sit alongside it as
+# a second file. See the mountPath in web-deployment.yaml, which mounts
+# this at exactly /etc/nginx/conf.d/default.conf to match.
+#
+# ONE DELIBERATE DIFFERENCE from the original: the real selfapp.conf
+# writes access/error logs to /var/log/nginx/self.access.log and
+# self.error.log, which land inside the container's writable layer,
+# invisible to `kubectl logs` (stdout/stderr only). Redirected both to
+# /dev/stdout and /dev/stderr here instead, the standard container
+# logging pattern.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "selfapp.fullname" . }}-web-config
+  labels:
+    {{- include "selfapp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+data:
+  selfapp.conf: |
+    upstream selfapp {
+        server {{ include "selfapp.fullname" . }}-app:8080;
+    }
+
+    server {
+        listen 80;
+        server_name localhost;
+
+        access_log /dev/stdout;
+        error_log  /dev/stderr;
+
+        location / {
+            proxy_pass http://selfapp;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }

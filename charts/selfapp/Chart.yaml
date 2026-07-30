@@ -1,0 +1,17 @@
+apiVersion: v2
+name: selfapp
+description: >-
+  Helm chart for selfapp-lite (Nginx -> Spring Boot -> MySQL), the
+  self-contained app from docker-buildlab-selfapp, deployable to Minikube
+  or any other Kubernetes cluster.
+type: application
+version: 0.1.0
+appVersion: "v1"
+keywords:
+  - spring-boot
+  - mysql
+  - nginx
+  - minikube
+home: https://github.com/alexiglesias/docker-buildlab-selfapp
+maintainers:
+  - name: Alex Iglesias

@@ -1,0 +1,36 @@
+# Scaffolded, matching docker-buildlab-selfapp's own docker-compose.yml
+# (a "selfcache" service the app doesn't connect to yet). Disabled by
+# default (memcached.enabled: false) — there is no real caching wired
+# into the Spring Boot app to test against this if you enable it, see
+# docker-buildlab-selfapp's README "Optional exercises".
+{{- if .Values.memcached.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "selfapp.fullname" . }}-memcached
+  labels:
+    {{- include "selfapp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: memcached
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "selfapp.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: memcached
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "selfapp.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: memcached
+    spec:
+      containers:
+        - name: memcached
+          image: "{{ .Values.memcached.image.repository }}:{{ .Values.memcached.image.tag }}"
+          ports:
+            - containerPort: 11211
+              name: memcached
+          resources:
+            {{- toYaml .Values.memcached.resources | nindent 12 }}
+{{- end }}
