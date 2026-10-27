@@ -7,6 +7,9 @@ metadata:
     app.kubernetes.io/component: app
 spec:
   type: ClusterIP
+  # Login sessions live in each app pod's memory, so always send the same
+  # caller (here: the same web pod) to the same app pod.
+  sessionAffinity: ClientIP
   ports:
     - port: 8080
       targetPort: {{ .Values.app.containerPort }}
