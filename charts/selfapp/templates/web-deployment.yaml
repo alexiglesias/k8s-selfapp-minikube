@@ -51,11 +51,12 @@ spec:
             # Matches web/Dockerfile's own HEALTHCHECK
             # (wget --spider http://localhost/) rather than a plain TCP
             # check.
+          # Liveness only checks Nginx itself is listening. Checking "/"
+          # would call the app, and restart Nginx whenever the app is down.
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: {{ .Values.web.containerPort }}
-            initialDelaySeconds: 10
+            initialDelaySeconds: 5
             periodSeconds: 20
       volumes:
         - name: nginx-conf

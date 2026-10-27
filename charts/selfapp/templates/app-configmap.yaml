@@ -1,8 +1,9 @@
-# Non-secret app configuration, confirmed against the real
-# docker-buildlab-selfapp docker-compose.yml (selfapp service): the app
-# reads DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASS directly, not
-# Spring Boot's spring.datasource.* convention — my earlier draft assumed
-# the latter and was wrong, this is the corrected version.
+# Non-secret app configuration, matching the env vars docker-buildlab-selfapp's
+# docker-compose.yml passes to the selfapp service (read by
+# application.properties):
+#   DB_HOST / DB_PORT / DB_NAME / DB_USER  -> MySQL connection
+#   MQ_HOST / MQ_PORT / MQ_USER            -> RabbitMQ connection
+# The passwords (DB_PASS, MQ_PASS) come from Secrets, set in app-deployment.yaml.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -15,3 +16,13 @@ data:
   DB_PORT: "3306"
   DB_NAME: {{ .Values.mysql.database | quote }}
   DB_USER: {{ .Values.mysql.username | quote }}
+  {{- if .Values.rabbitmq.enabled }}
+  MQ_HOST: {{ printf "%s-rabbitmq" (include "selfapp.fullname" .) | quote }}
+  MQ_PORT: "5672"
+  MQ_USER: {{ .Values.rabbitmq.username | quote }}
+  {{- else }}
+  # RabbitMQ disabled: Spring maps this env var to
+  # management.health.rabbit.enabled=false, so /actuator/health doesn't
+  # report DOWN and the pod can still become Ready (messaging won't work).
+  MANAGEMENT_HEALTH_RABBIT_ENABLED: "false"
+  {{- end }}

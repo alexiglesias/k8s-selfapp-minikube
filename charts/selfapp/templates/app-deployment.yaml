@@ -19,10 +19,9 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: app
     spec:
-      # Don't let the app start scheduling traffic before MySQL can accept
-      # connections. This is a blunt fixed-delay approach, not a real
-      # dependency check — see README "Known gaps" for a better version
-      # using an init container that polls MySQL directly.
+      # Block app start-up until its dependencies accept TCP connections.
+      # A TCP poll is a blunt check (see README "Known gaps"), but enough
+      # to avoid the app crash-looping while MySQL/RabbitMQ boot.
       initContainers:
         - name: wait-for-mysql
           image: busybox:1.36
@@ -34,6 +33,18 @@ spec:
                 echo "waiting for mysql..."
                 sleep 3
               done
+        {{- if .Values.rabbitmq.enabled }}
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ include "selfapp.fullname" . }}-rabbitmq 5672; do
+                echo "waiting for rabbitmq..."
+                sleep 3
+              done
+        {{- end }}
       containers:
         - name: app
           image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"
@@ -45,39 +56,44 @@ spec:
             - configMapRef:
                 name: {{ include "selfapp.fullname" . }}-app-config
           env:
-            # DB_PASS confirmed against docker-compose.yml's selfapp
-            # service — pulled from the same Secret keys the selfdb
-            # (mysql) container itself uses, just remapped to the env var
-            # name the app actually reads.
+            # Passwords come from Secrets, remapped to the env var names the
+            # app reads (same as docker-compose.yml's selfapp service).
             - name: DB_PASS
               valueFrom:
                 secretKeyRef:
                   name: {{ include "selfapp.fullname" . }}-mysql-secret
                   key: MYSQL_PASSWORD
+            {{- if .Values.rabbitmq.enabled }}
+            - name: MQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "selfapp.fullname" . }}-rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_PASS
+            {{- end }}
           resources:
             {{- toYaml .Values.app.resources | nindent 12 }}
           securityContext:
-            # Confirmed against app/Dockerfile: the image already creates
-            # and switches to a non-root user (`useradd -r -u 1001
-            # appuser` / `USER 1001`). Pinning it here too means the pod
-            # spec asserts the same thing the image already does, rather
-            # than silently relying on the image having gotten it right.
+            # app/Dockerfile already runs as non-root user 1001; asserting it
+            # here means Kubernetes refuses to start the pod if that changes.
             runAsNonRoot: true
             runAsUser: 1001
+          # /actuator/health is the same endpoint app/Dockerfile's HEALTHCHECK
+          # uses. Startup timing gets a proper startupProbe in Step 4.
+          # Gives Spring Boot up to 5 min to start. The other two probes
+          # only begin once this one has passed.
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.app.containerPort }}
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: {{ .Values.app.containerPort }}
-            initialDelaySeconds: 30
             periodSeconds: 10
-            # Confirmed against pom.xml (spring-boot-starter-actuator is
-            # a real dependency) and app/Dockerfile's own HEALTHCHECK,
-            # which hits this exact path. initialDelaySeconds bumped to
-            # 30s to roughly match the Dockerfile's own
-            # --start-period=30s for the JVM to actually come up.
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: {{ .Values.app.containerPort }}
-            initialDelaySeconds: 45
             periodSeconds: 20

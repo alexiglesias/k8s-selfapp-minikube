@@ -22,9 +22,8 @@ kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace
 if [ "${ENV}" = "dev" ]; then
   echo "[INFO] Building images into Minikube's own Docker daemon..."
   echo "[INFO] (requires the app/web source at ../docker-buildlab-selfapp relative to this repo)"
-  eval "$(minikube docker-env)"
-  docker build -t selfapp-lite:dev ../docker-buildlab-selfapp/app
-  docker build -t selfapp-lite-web:dev ../docker-buildlab-selfapp/web
+  minikube image build -t selfapp-lite:dev ../docker-buildlab-selfapp/app
+  minikube image build -t selfapp-lite-web:dev ../docker-buildlab-selfapp/web
 fi
 
 echo "[INFO] Linting the chart..."
