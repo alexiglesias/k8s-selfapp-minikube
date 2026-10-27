@@ -119,7 +119,12 @@ ingress:
   enabled: true
   className: nginx # the Minikube ingress addon registers this class
   host: selfapp.local
-  annotations: {}
+  annotations:
+    # Sticky sessions: the Ingress sets a cookie so each browser always
+    # reaches the same web pod (which, via the app Service's
+    # sessionAffinity, always reaches the same app pod).
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "selfapp-route"
 
 # -----------------------------------------------------------------------
 # Service types
