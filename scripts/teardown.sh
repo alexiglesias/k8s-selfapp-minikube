@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Uninstalls the release. Does NOT delete the namespace or the MySQL PVC
-# by default — pass --purge to remove everything, including data.
+# Uninstalls the release. The MySQL PVC is kept (helm.sh/resource-policy:
+# keep), so data survives. Pass --purge to delete everything, data included.
 #
 # Usage:
 #   ./scripts/teardown.sh dev
-#   ./scripts/teardown.sh prod
-#   ./scripts/teardown.sh dev --purge
+#   ./scripts/teardown.sh prod --purge
 set -euo pipefail
 
 ENV="${1:-}"
@@ -21,16 +20,27 @@ NAMESPACE="selfapp-${ENV}"
 echo "[INFO] Uninstalling release 'selfapp' from namespace ${NAMESPACE}..."
 helm uninstall selfapp -n "${NAMESPACE}" || echo "[WARN] Release not found, continuing"
 
-if [ "${PURGE}" = "--purge" ]; then
-  echo "[WARN] --purge set: deleting the PVC (this destroys the MySQL data) and the namespace itself."
-  read -r -p "Type 'purge' to confirm: " CONFIRM
-  if [ "${CONFIRM}" = "purge" ]; then
-    kubectl delete namespace "${NAMESPACE}" --ignore-not-found
-    echo "[DONE] Namespace ${NAMESPACE} and everything in it removed."
-  else
-    echo "Aborted purge. Release uninstalled, but namespace/PVC left in place."
-  fi
-else
-  echo "[DONE] Release uninstalled. Namespace and PVC (if any) left in place."
-  echo "[INFO] Re-run with --purge to remove those too."
+if [ "${PURGE}" != "--purge" ]; then
+  echo "[DONE] Release uninstalled. MySQL PVC and namespace kept."
+  echo "[INFO] Re-run with --purge to delete them too."
+  exit 0
 fi
+
+echo "[WARN] --purge: this deletes the namespace, the PVC and ALL MySQL data."
+read -r -p "Type 'purge' to confirm: " CONFIRM
+if [ "${CONFIRM}" != "purge" ]; then
+  echo "Aborted. Release uninstalled, PVC and namespace kept."
+  exit 0
+fi
+
+kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait
+
+# Minikube's storage keeps files under /tmp/hostpath-provisioner/<namespace>/
+# even after the PVC is deleted, and a new PVC with the same name would reuse
+# them. Remove them so the next install really starts with an empty database.
+if command -v minikube >/dev/null 2>&1 && minikube status >/dev/null 2>&1; then
+  minikube ssh -- sudo rm -rf "/tmp/hostpath-provisioner/${NAMESPACE}"
+  echo "[INFO] Removed Minikube's leftover data for ${NAMESPACE}."
+fi
+
+echo "[DONE] Namespace ${NAMESPACE} and all its data removed."

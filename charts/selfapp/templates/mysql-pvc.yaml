@@ -5,6 +5,11 @@ metadata:
   name: {{ include "selfapp.fullname" . }}-mysql-pvc
   labels:
     {{- include "selfapp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+  annotations:
+    # Tells Helm NOT to delete this PVC on `helm uninstall`, so the
+    # database survives. Delete it on purpose with teardown.sh --purge.
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
     - ReadWriteOnce
