@@ -79,15 +79,21 @@ spec:
             runAsUser: 1001
           # /actuator/health is the same endpoint app/Dockerfile's HEALTHCHECK
           # uses. Startup timing gets a proper startupProbe in Step 4.
+          # Gives Spring Boot up to 5 min to start. The other two probes
+          # only begin once this one has passed.
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .Values.app.containerPort }}
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /actuator/health
               port: {{ .Values.app.containerPort }}
-            initialDelaySeconds: 30
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /actuator/health
               port: {{ .Values.app.containerPort }}
-            initialDelaySeconds: 45
             periodSeconds: 20

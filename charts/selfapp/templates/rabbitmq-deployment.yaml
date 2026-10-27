@@ -40,11 +40,13 @@ spec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]
             initialDelaySeconds: 20
             periodSeconds: 10
-            timeoutSeconds: 10
+            timeoutSeconds: 20
+          # Liveness only checks the AMQP port is open. It's cheap, unlike
+          # rabbitmq-diagnostics, which starts a new Erlang VM each time and
+          # can time out on a busy node, causing needless restarts.
           livenessProbe:
-            exec:
-              command: ["rabbitmq-diagnostics", "-q", "ping"]
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 15
+            tcpSocket:
+              port: 5672
+            initialDelaySeconds: 30
+            periodSeconds: 20
 {{- end }}

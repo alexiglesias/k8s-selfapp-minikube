@@ -15,7 +15,7 @@ app:
       cpu: 50m
       memory: 192Mi
     limits:
-      cpu: 300m
+      cpu: "1"
       memory: 384Mi
 
 web:
@@ -34,7 +34,7 @@ mysql:
       memory: 192Mi
     limits:
       cpu: 300m
-      memory: 384Mi
+      memory: 768Mi
 
 ingress:
   host: selfapp.dev.local

@@ -40,16 +40,27 @@ spec:
           volumeMounts:
             - name: mysql-data
               mountPath: /var/lib/mysql
+          # 127.0.0.1 forces a network connection, so the check only passes
+          # once the real server is up, not the temporary one MySQL runs
+          # during first-time setup (same as docker-compose.yml).
+          # startupProbe allows up to 5 min for that setup; the other probes
+          # (which can restart MySQL) only begin after it passes.
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             exec:
-              command: ["mysqladmin", "ping", "-h", "localhost"]
-            initialDelaySeconds: 20
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             exec:
-              command: ["mysqladmin", "ping", "-h", "localhost"]
-            initialDelaySeconds: 30
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
             periodSeconds: 20
+            timeoutSeconds: 5
       volumes:
         - name: mysql-data
           {{- if .Values.mysql.persistence.enabled }}
