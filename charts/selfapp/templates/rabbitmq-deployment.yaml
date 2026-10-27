@@ -15,6 +15,10 @@ spec:
       app.kubernetes.io/component: rabbitmq
   template:
     metadata:
+      annotations:
+        # Restart RabbitMQ if its username/password change, so it creates
+        # the new user (it only reads them on a fresh start).
+        checksum/secret: {{ include (print $.Template.BasePath "/rabbitmq-secret.yaml") . | sha256sum }}
       labels:
         app.kubernetes.io/name: {{ include "selfapp.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}

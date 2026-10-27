@@ -14,6 +14,17 @@ spec:
       app.kubernetes.io/component: app
   template:
     metadata:
+      annotations:
+        # Fingerprints of the app's settings and passwords: if any of them
+        # change, the fingerprint changes and Kubernetes restarts the app.
+        checksum/config: {{ include (print $.Template.BasePath "/app-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ print (include (print $.Template.BasePath "/mysql-secret.yaml") .) (include (print $.Template.BasePath "/rabbitmq-secret.yaml") .) | sha256sum }}
+        {{- if .Values.app.prometheusScrape }}
+        # Convention many Prometheus setups use to discover what to scrape
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.app.containerPort | quote }}
+        prometheus.io/path: /actuator/prometheus
+        {{- end }}
       labels:
         app.kubernetes.io/name: {{ include "selfapp.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}

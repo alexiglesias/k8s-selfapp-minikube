@@ -18,6 +18,7 @@ app:
     pullPolicy: IfNotPresent
   replicaCount: 1
   containerPort: 8080 # confirmed via app/Dockerfile's EXPOSE 8080
+  prometheusScrape: true
   resources:
     requests:
       cpu: 100m
