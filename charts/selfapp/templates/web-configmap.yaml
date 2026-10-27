@@ -1,20 +1,13 @@
-# Reverse proxy config, aligned with the real web/selfapp.conf —
-# same upstream/server_name/proxy_set_header structure, just with the
-# container name (selfapp:8080 in the original, Docker Compose only)
-# replaced by this chart's in-cluster Service DNS name.
+# Reverse proxy config, kept identical to docker-buildlab-selfapp's
+# web/selfapp.conf except for the upstream: the Compose container name
+# (selfapp:8080) is replaced by this chart's in-cluster Service name.
 #
-# Confirmed against the real web/Dockerfile: it does
-# `COPY selfapp.conf /etc/nginx/conf.d/default.conf`, so this ConfigMap's
-# content is meant to fully REPLACE default.conf, not sit alongside it as
-# a second file. See the mountPath in web-deployment.yaml, which mounts
-# this at exactly /etc/nginx/conf.d/default.conf to match.
+# Mounted over /etc/nginx/conf.d/default.conf (see web-deployment.yaml),
+# matching the Dockerfile's `COPY selfapp.conf .../default.conf`.
 #
-# ONE DELIBERATE DIFFERENCE from the original: the real selfapp.conf
-# writes access/error logs to /var/log/nginx/self.access.log and
-# self.error.log, which land inside the container's writable layer,
-# invisible to `kubectl logs` (stdout/stderr only). Redirected both to
-# /dev/stdout and /dev/stderr here instead, the standard container
-# logging pattern.
+# Security: the app serves /actuator/prometheus without login, relying on
+# Nginx to keep it internal. Only /actuator/health is proxied; every other
+# /actuator path returns 404 here.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,13 +26,24 @@ data:
         server_name localhost;
 
         access_log /dev/stdout;
-        error_log  /dev/stderr;
+        error_log  /dev/stderr warn;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
 
         location / {
             proxy_pass http://selfapp;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Health status (UP/DOWN only) stays public
+        location = /actuator/health {
+            proxy_pass http://selfapp;
+        }
+
+        # Everything else under /actuator is blocked
+        location /actuator {
+            return 404;
         }
     }
