@@ -1,0 +1,11 @@
+# Files Helm leaves out when packaging the chart (helm package)
+.DS_Store
+.git/
+.vscode/
+*.swp
+*.bak
+*.tmp
+
+# Never package passwords: deploy.sh writes <env>.secrets.yaml in this folder
+*.secrets.yaml
+values-secrets.yaml

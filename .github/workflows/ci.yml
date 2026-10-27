@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only: this workflow only checks code, it never changes the repo
+permissions:
+  contents: read
+
+jobs:
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+  chart:
+    name: Helm chart (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: dev
+            args: -f charts/selfapp/values-dev.yaml
+          - name: prod
+            args: -f charts/selfapp/values-prod.yaml
+          - name: rabbitmq-disabled
+            args: -f charts/selfapp/values-dev.yaml --set rabbitmq.enabled=false
+    env:
+      KUBECONFORM_VERSION: v0.8.0
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.1
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin kubeconform
+
+      - name: helm lint
+        run: helm lint --strict charts/selfapp ${{ matrix.args }}
+
+      - name: Render and validate with kubeconform
+        run: helm template selfapp charts/selfapp ${{ matrix.args }} | kubeconform -strict -summary
