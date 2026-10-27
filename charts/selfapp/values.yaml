@@ -92,17 +92,24 @@ memcached:
       memory: 128Mi
 
 rabbitmq:
-  enabled: false
+  # Required: the app publishes/consumes "user.created" events
+  # (spring-boot-starter-amqp). If you disable it, the app's Rabbit health
+  # check is switched off too so the pod can still become Ready, but
+  # messaging won't work.
+  enabled: true
   image:
     repository: rabbitmq
-    tag: "3.13-management"
+    tag: "3.13-management-alpine" # same image as docker-compose.yml
+    pullPolicy: IfNotPresent
+  username: selfmq
+  password: CHANGE_ME # override at install time, never commit a real one
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 300m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # -----------------------------------------------------------------------
 # Ingress

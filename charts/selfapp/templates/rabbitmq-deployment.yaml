@@ -1,6 +1,3 @@
-# Scaffolded, matching docker-buildlab-selfapp's own docker-compose.yml
-# (a "selfmq" service the app doesn't connect to yet). Disabled by default
-# (rabbitmq.enabled: false) — same caveat as memcached-deployment.yaml.
 {{- if .Values.rabbitmq.enabled }}
 apiVersion: apps/v1
 kind: Deployment
@@ -26,11 +23,28 @@ spec:
       containers:
         - name: rabbitmq
           image: "{{ .Values.rabbitmq.image.repository }}:{{ .Values.rabbitmq.image.tag }}"
+          imagePullPolicy: {{ .Values.rabbitmq.image.pullPolicy }}
           ports:
             - containerPort: 5672
               name: amqp
             - containerPort: 15672
               name: management
+          envFrom:
+            - secretRef:
+                name: {{ include "selfapp.fullname" . }}-rabbitmq-secret
           resources:
             {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+          # Same check as docker-compose.yml's selfmq healthcheck
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 15
 {{- end }}
