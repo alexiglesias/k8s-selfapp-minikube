@@ -25,8 +25,6 @@ Login (Spring Security in-memory users, same as docker-buildlab-selfapp):
 
 To uninstall:
   helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
-  # Note: this does NOT delete the MySQL PVC by default (PVCs outlive
-  # their release on purpose, to avoid an accidental `helm uninstall`
-  # from destroying your data). Delete it explicitly if you actually want
-  # a clean slate:
-  #   kubectl delete pvc {{ include "selfapp.fullname" . }}-mysql-pvc -n {{ .Release.Namespace }}
+  # The MySQL PVC is kept on purpose (helm.sh/resource-policy: keep), so
+  # your data survives. To delete everything, data included:
+  #   ./scripts/teardown.sh <dev|prod> --purge
