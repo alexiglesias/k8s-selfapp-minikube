@@ -1,140 +1,315 @@
 # k8s-selfapp-minikube
 
-Deploy selfapp-lite (from [docker-buildlab-selfapp](https://github.com/alexiglesias/docker-buildlab-selfapp)) on Kubernetes using Minikube — free, runs on your own machine. Covers Pods, Deployments, Services, Ingress, Secrets, and Helm, with zero cloud cost.
+> The selfapp stack (Nginx → Spring Boot → MySQL, with RabbitMQ messaging) from
+> [docker-buildlab-selfapp](https://github.com/alexiglesias/docker-buildlab-selfapp),
+> deployed on Kubernetes with a single Helm chart. Runs locally on Minikube at zero cloud
+> cost, in separate `dev` and `prod` namespaces. Passwords are generated per environment
+> and never committed, only `/actuator/health` is reachable from outside the cluster,
+> and every push is checked in CI with `helm lint`, `kubeconform` and `shellcheck`.
 
-This is the Kubernetes-local project from the roadmap, adapted to deploy **selfapp-lite** (Nginx → Spring Boot → MySQL) instead of VProfile, since selfapp-lite is the simpler, already-built reference app.
+[![CI](https://github.com/alexiglesias/k8s-selfapp-minikube/actions/workflows/ci.yml/badge.svg)](https://github.com/alexiglesias/k8s-selfapp-minikube/actions/workflows/ci.yml)
+[![helm](https://img.shields.io/badge/helm-4-0F1689)](https://helm.sh/)
+[![kubernetes](https://img.shields.io/badge/kubernetes-minikube-326CE5)](https://minikube.sigs.k8s.io/)
+[![resources](https://img.shields.io/badge/k8s%20resources-14-brightgreen)](./charts/selfapp/templates)
+[![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-## What this deploys
+## What's in here
 
-| Component | What it is |
-|---|---|
-| `mysql` | Single MySQL instance, backed by a PVC |
-| `app` | The Spring Boot app from docker-buildlab-selfapp |
-| `web` | Nginx, reverse-proxying to `app`, same role as `web/selfapp.conf` in the original repo |
-| `memcached`, `rabbitmq` | Scaffolded, **disabled by default** — mirrors docker-buildlab-selfapp's own `docker-compose.yml`, where these services exist but the app doesn't connect to them yet |
+A Helm chart that runs the same four services as the Docker Compose version, translated
+into Kubernetes objects: Deployments for each service, Services for in-cluster DNS, an
+Ingress as the single entry point, ConfigMaps for settings, Secrets for passwords and a
+PersistentVolumeClaim for the MySQL data.
 
-Everything is packaged as a single Helm chart at `charts/selfapp/`, deployable to two namespaces (`selfapp-dev`, `selfapp-prod`) with different values files, or to any other Kubernetes cluster.
+Two helper scripts wrap the whole flow: `deploy.sh` builds the images inside Minikube,
+generates random passwords for the environment and installs the chart; `teardown.sh`
+removes it, keeping the database unless you ask for a full purge.
 
-## What's confirmed vs. still assumed
+What the chart takes care of:
 
-This chart went through three rounds of corrections against real source files: `docker-compose.yml`, then `app/Dockerfile` + `pom.xml`, then finally `web/Dockerfile`. As of the third round, every assumption below has been checked against a real file — nothing left unverified.
+- **Start-up order:** init containers keep the app waiting until MySQL and RabbitMQ
+  accept connections, and startup probes give MySQL and Spring Boot time to boot without
+  being restarted halfway through.
+- **Self-healing:** readiness and liveness probes on every service.
+- **Config changes roll out by themselves:** checksum annotations restart a pod when its
+  ConfigMap or Secret changes.
+- **Data safety:** the MySQL PVC survives `helm uninstall`
+  (`helm.sh/resource-policy: keep`).
+- **Two environments from one chart:** `values-dev.yaml` and `values-prod.yaml` (2
+  replicas of app and web, pinned image tag, more resources).
+- **Prometheus-ready:** the app pods carry `prometheus.io/*` annotations for
+  [observability-selfapp](https://github.com/alexiglesias/observability-selfapp).
 
-**Round 1 (docker-compose.yml) — fixed real mistakes:** the app reads custom `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASS` env vars, not Spring's `spring.datasource.*` convention as I'd first guessed. The web image is `selfapp-lite-web`, not `selfapp-web`.
+## Requirements
 
-**Round 2 (app/Dockerfile + pom.xml) — assumptions confirmed correct:** `EXPOSE 8080` confirmed `app.containerPort`. `spring-boot-starter-actuator` in `pom.xml`, plus the Dockerfile's own `HEALTHCHECK` hitting `/actuator/health`, confirmed the probes could use a real health check rather than a plain TCP fallback. The Dockerfile's non-root `USER 1001` is now also pinned explicitly in `app-deployment.yaml`'s `securityContext`.
+- **Docker Desktop** with at least **4 CPUs and 6 GB of memory** (Settings → Resources)
+- **Minikube**, **kubectl** and **Helm 4** (`brew install minikube kubectl helm`)
+- **docker-buildlab-selfapp** cloned **next to** this repo; `deploy.sh` builds the images
+  from it:
 
-**Round 3 (web/Dockerfile) — found and fixed a real bug, not just a hypothetical one:** the real Dockerfile does `COPY selfapp.conf /etc/nginx/conf.d/default.conf` — it *replaces* the base nginx image's `default.conf` entirely. My chart originally mounted the config as a separate file (`/etc/nginx/conf.d/selfapp.conf`), which would have left both the base image's `default.conf` and my `selfapp.conf` present at once, two server blocks both listening on port 80. `web-deployment.yaml` now mounts the ConfigMap at `/etc/nginx/conf.d/default.conf` to replicate the real Dockerfile exactly. The probes were also switched to `httpGet` on `/`, matching the Dockerfile's own `wget --spider http://localhost/` healthcheck.
-
-**Still true, not a chart bug:** `docker-compose.yml` has real-looking plaintext dev credentials (`rootpass`, `selfpass`) as defaults, which is normal for a local Compose file but worth being deliberate about — this chart's `values.yaml` uses `CHANGE_ME` placeholders instead of mirroring those, on purpose.
-
-None of this was tested against a running cluster — no `helm`, `kubectl`, or `minikube` available in the environment I built this in, and no network path to install them. I validated every pure-YAML file with a YAML parser, checked brace-balance on all template files, and cross-checked every `include` call and every Deployment/Service selector-label pair by hand — but I could not run `helm template` or `helm lint`. Run those yourself as the first step, before `helm install`.
-
-## Prerequisites
-
-- Minikube
-- kubectl
-- Helm 3
-- Docker (Minikube's driver, and for building images locally)
-- Optionally, [Lens](https://k8slens.dev/) (free) to browse the cluster visually
-
-## Secrets
-
-`values.yaml` ships with placeholder MySQL credentials (`CHANGE_ME`). Never edit those in place and commit them. Instead, override at install time:
-
-```bash
-helm upgrade --install selfapp ./charts/selfapp \
-  -n selfapp-dev \
-  -f charts/selfapp/values.yaml \
-  -f charts/selfapp/values-dev.yaml \
-  --set mysql.rootPassword='something-strong' \
-  --set mysql.password='something-else-strong'
+```
+Projects/
+├── docker-buildlab-selfapp/
+└── k8s-selfapp-minikube/
 ```
 
-Or create a gitignored `values-secrets.yaml` (already covered by `.gitignore`) and pass it as an extra `-f`.
+- *Optional:* `kubeconform` and `shellcheck` to run the CI checks locally
 
-## Usage
+## Architecture
+
+```mermaid
+%%{init: {'flowchart': {'curve': 'linear', 'nodeSpacing': 40, 'rankSpacing': 50}}}%%
+flowchart TD
+    BR["<b>Browser</b><br/>selfapp.dev.local"]
+
+    subgraph MK["Minikube cluster"]
+        direction TB
+        ING["<b>Ingress · ingress-nginx</b><br/>sticky-session cookie"]
+
+        subgraph NS["Namespace selfapp-dev / selfapp-prod"]
+            direction TB
+            WEB["<b>web · Nginx 1.27</b><br/>Deployment · :80<br/>blocks /actuator/*"]
+            APP["<b>app · Spring Boot 3.3</b><br/>Deployment · :8080<br/>sessionAffinity: ClientIP"]
+            DB["<b>mysql · MySQL 8.0</b><br/>Deployment · :3306"]
+            MQ["<b>rabbitmq · RabbitMQ 3.13</b><br/>Deployment · :5672"]
+            PVC[("selfapp-mysql-pvc<br/>PersistentVolumeClaim")]
+        end
+    end
+
+    BR -->|"HTTP :80"| ING
+    ING -->|"Service selfapp-web"| WEB
+    WEB -->|"Service selfapp-app"| APP
+    APP -->|"JDBC · Service selfapp-mysql"| DB
+    APP <-->|"AMQP · Service selfapp-rabbitmq<br/>publish / consume"| MQ
+    DB --- PVC
+
+    classDef host fill:#F1EFE8,stroke:#5F5E5A,stroke-width:1px,color:#2C2C2A
+    classDef tier fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px,color:#04342C
+    classDef msg fill:#EEEDFE,stroke:#534AB7,stroke-width:1px,color:#26215C
+    class BR,PVC,ING host
+    class WEB,APP,DB tier
+    class MQ msg
+    style MK fill:transparent,stroke:#888780,stroke-width:1px,stroke-dasharray:5 5,color:#888780
+    style NS fill:transparent,stroke:#888780,stroke-width:1px,stroke-dasharray:5 5,color:#888780
+    linkStyle default stroke:#888780,stroke-width:1.5px
+```
+
+Only the Ingress is reachable from outside the cluster. Every other Service is
+`ClusterIP`, so pods find each other by Service name through Kubernetes DNS
+(`selfapp-mysql`, `selfapp-rabbitmq`, ...), the same way Compose containers find each
+other by service name.
+
+### Kubernetes objects
+
+| Component | Objects | Notes |
+|---|---|---|
+| `mysql` | Secret, PVC, Deployment, Service | `Recreate` strategy so two MySQL pods never share the volume; startup probe allows up to 5 min for first-time setup |
+| `app` | ConfigMap, Deployment, Service | Runs as non-root user 1001; init containers wait for MySQL and RabbitMQ; passwords come from the Secrets |
+| `web` | ConfigMap, Deployment, Service | Same `selfapp.conf` as the Compose version, mounted over `default.conf` |
+| `rabbitmq` | Secret, Deployment, Service | Credentials from a Secret (the default `guest` user can't connect from other pods) |
+| Ingress | Ingress | `nginx` class from Minikube's ingress addon |
+
+### Compose → Kubernetes
+
+| docker-compose.yml | This chart |
+|---|---|
+| `environment:` | ConfigMap (settings) + Secret (passwords) |
+| `depends_on: condition: service_healthy` | init containers + readiness probes |
+| `healthcheck:` | startup, readiness and liveness probes |
+| named volume `selfdb-data` | PersistentVolumeClaim |
+| `ports: "80:80"` | Ingress |
+| `.env` (git-ignored) | `<env>.secrets.yaml` (git-ignored, generated) |
+
+## Quick start
 
 ```bash
-# 1. Bring up Minikube + ingress addon
+# 1. Clone both repos side by side
+git clone https://github.com/alexiglesias/docker-buildlab-selfapp.git
+git clone https://github.com/alexiglesias/k8s-selfapp-minikube.git
+cd k8s-selfapp-minikube
+
+# 2. Start Minikube with the ingress addon
 ./scripts/minikube-up.sh
 
-# 2. Deploy to dev (builds images into Minikube's own Docker daemon)
+# 3. Build the images, generate passwords and install the chart
 ./scripts/deploy.sh dev
 
-# 3. Point selfapp.dev.local at Minikube and visit it
-echo "$(minikube ip) selfapp.dev.local" | sudo tee -a /etc/hosts
-open http://selfapp.dev.local   # or just curl it
+# 4. Make the Ingress reachable (macOS: keep this running in its own terminal)
+minikube tunnel
 
-# 4. Deploy to "prod" as well, side by side, in its own namespace
-./scripts/deploy.sh prod
+# 5. Point the hostname at it (once)
+echo "127.0.0.1 selfapp.dev.local" | sudo tee -a /etc/hosts
 
-# 5. Explore the cluster
-lens &   # or: kubectl get all -n selfapp-dev
-
-# 6. Tear down when done
-./scripts/teardown.sh dev
-./scripts/teardown.sh prod --purge   # also deletes the PVC and namespace
+# 6. Check and open the app
+kubectl get pods -n selfapp-dev
+curl http://selfapp.dev.local/actuator/health      # {"status":"UP",...}
+open http://selfapp.dev.local
 ```
 
-## Manual equivalent (no wrapper scripts)
+On Linux you can usually skip `minikube tunnel` and use `$(minikube ip)` instead of
+`127.0.0.1` in step 5.
+
+## Application credentials
+
+The same demo users as docker-buildlab-selfapp (in-memory, for learning only):
+
+| User | Password | Role |
+|---|---|---|
+| `admin_self` | `admin_self` | ADMIN: add and delete users |
+| `test_self` | `test_self` | USER: view only |
+
+## Environments
+
+| | dev | prod |
+|---|---|---|
+| Namespace | `selfapp-dev` | `selfapp-prod` |
+| Hostname | `selfapp.dev.local` | `selfapp.local` |
+| Image tag | `:dev`, `pullPolicy: Never` | `:v1` (pinned), `pullPolicy: IfNotPresent` |
+| App / web replicas | 1 / 1 | 2 / 2 |
+| MySQL volume | 1 Gi | 2 Gi |
+| Passwords | `charts/selfapp/dev.secrets.yaml` | `charts/selfapp/prod.secrets.yaml` |
 
 ```bash
-minikube start --memory=4096 --cpus=4
-minikube addons enable ingress
-
-kubectl create namespace selfapp-dev
-kubectl create namespace selfapp-prod
-
-helm lint ./charts/selfapp -f charts/selfapp/values.yaml -f charts/selfapp/values-dev.yaml
-
-helm install selfapp ./charts/selfapp \
-  -n selfapp-dev \
-  -f charts/selfapp/values.yaml \
-  -f charts/selfapp/values-dev.yaml
+./scripts/deploy.sh prod
+echo "127.0.0.1 selfapp.local" | sudo tee -a /etc/hosts
 ```
 
-## Project structure
+With the default 4 GB Minikube, run one environment at a time.
+
+## Security
+
+- **No passwords in Git.** `deploy.sh` generates `<env>.secrets.yaml` with random
+  passwords (`openssl rand`, `chmod 600`) and refuses to run if Git wouldn't ignore it.
+  `.helmignore` keeps the file out of `helm package` too.
+- **Metrics stay inside the cluster.** The app serves `/actuator/prometheus` without
+  login, so Nginx proxies only `/actuator/health` and returns 404 for every other
+  `/actuator` path. Prometheus scrapes the app pods directly on `:8080`.
+- **Non-root app.** The pod spec enforces `runAsNonRoot` and user 1001, matching the
+  image.
+- **Least-privilege CI.** The workflow has read-only permissions and pinned tool
+  versions.
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://selfapp.dev.local/actuator/prometheus   # 404
+```
+
+## Messaging with RabbitMQ
+
+```bash
+# Add a user in the web UI, then see the event being consumed
+kubectl logs -n selfapp-dev deploy/selfapp-app | grep "received"
+
+# The queue, as seen by the broker
+kubectl exec -n selfapp-dev deploy/selfapp-rabbitmq -- rabbitmqctl list_queues
+```
+
+## How it's tested
+
+**On every push and pull request** ([ci.yml](.github/workflows/ci.yml)):
+
+| Check | What it catches |
+|---|---|
+| `shellcheck scripts/*.sh` | Common Bash mistakes in the scripts |
+| `helm lint --strict` | Template and chart errors (dev, prod, RabbitMQ disabled) |
+| `helm template \| kubeconform -strict` | Objects that aren't valid Kubernetes, e.g. a misspelled field |
+
+**By hand on Minikube** before each change was merged:
+
+- all pods `1/1` with no restarts after a clean install
+- user creation publishes and consumes a `user.created` message
+- `/actuator/prometheus` returns 404 through the Ingress and 200 inside the cluster
+- changing a password with `--set rabbitmq.password=...` restarts only the app and
+  RabbitMQ, and messaging keeps working
+- `teardown.sh` keeps the users; `teardown.sh --purge` starts from an empty database
+- prod with 2 app replicas keeps you logged in (sticky sessions)
+
+## Troubleshooting
+
+Problems I actually hit while building this, and their fixes:
+
+| Problem | Cause and fix |
+|---|---|
+| App in `CrashLoopBackOff`, logs say `Unable to determine Dialect` | The app can't log in to MySQL. Check with `kubectl exec -n selfapp-dev deploy/selfapp-mysql -- mysql -uselfuser -p<password> -e "SHOW DATABASES;"`. If it says `Access denied`, MySQL's first-time setup was interrupted or the password changed after it ran (MySQL only reads it once). Fix: `./scripts/teardown.sh dev --purge`, then deploy again |
+| MySQL restarts with `OOMKilled` | Memory limit too low for MySQL 8's first start. The chart uses 768 Mi; don't go below it |
+| Old data comes back after deleting the PVC | Minikube's storage keeps files in `/tmp/hostpath-provisioner/<namespace>/` after the PVC is gone, and a new PVC with the same name reuses them. `teardown.sh --purge` deletes that folder too |
+| `docker build` fails with `404 page not found` | `minikube docker-env` doesn't work with the containerd runtime. `deploy.sh` uses `minikube image build`, which works with any runtime |
+| `failed calling webhook "validate.nginx.ingress.kubernetes.io"` | The ingress controller isn't ready yet (common right after a restart). Wait for it: `kubectl get pods -n ingress-nginx`, then deploy again |
+| Logged out when adding a user in prod | Login sessions live in each app pod's memory. With 2 replicas, requests must keep reaching the same pod: the chart sets an Ingress cookie and `sessionAffinity: ClientIP` |
+| `selfapp.dev.local` doesn't load on macOS | Minikube's IP isn't reachable from the Mac with the Docker driver. Run `minikube tunnel` and use `127.0.0.1` in `/etc/hosts` |
+| Replica count doesn't change after `helm upgrade` | A manual `kubectl scale` took over the field. Change it through the values file instead, or scale back by hand once |
+
+**After restarting your computer:** start Docker Desktop, run `minikube start`, wait for
+the pods with `kubectl get pods -n selfapp-dev -w`, then start `minikube tunnel` again.
+
+## Stop / reset
+
+```bash
+./scripts/teardown.sh dev            # uninstall, keep the database and namespace
+./scripts/teardown.sh dev --purge    # delete everything, including all data
+minikube stop                        # stop the cluster, keep everything
+minikube delete                      # delete the whole cluster
+```
+
+## Known limitations
+
+- **Sticky sessions, not shared sessions.** If an app pod dies, its users are logged
+  out. The proper fix is storing sessions in MySQL with Spring Session (an app change).
+- **Liveness includes MySQL and RabbitMQ.** `/actuator/health` reports DOWN when a
+  dependency is down, so Kubernetes restarts the app even though restarting won't help.
+  Spring's `/actuator/health/liveness` would avoid this, but the app's security config
+  only makes `/actuator/health` public.
+- **MySQL is a single Deployment**, not a StatefulSet or a replicated database.
+- **Secrets are base64-encoded, not encrypted** at rest in Minikube's etcd.
+- **No NetworkPolicies:** any pod in the namespace can reach any other.
+- **Images are built locally**, not pulled from a registry.
+
+## Why Minikube
+
+The point of this project is learning Kubernetes and Helm without a cloud bill. A
+managed control plane such as AWS EKS costs $0.10/hour (about $73/month) before any
+worker nodes. Minikube runs the same Kubernetes API on a laptop for free, and the chart
+itself isn't tied to Minikube: change the image repositories, the storage class and the
+ingress class, and it installs on any cluster.
+
+## Project layout
 
 ```
 k8s-selfapp-minikube/
-├── charts/
-│   └── selfapp/
-│       ├── Chart.yaml
-│       ├── values.yaml            # shared defaults
-│       ├── values-dev.yaml        # dev overrides
-│       ├── values-prod.yaml       # "prod" overrides (still local Minikube)
-│       └── templates/
-│           ├── _helpers.tpl
-│           ├── NOTES.txt
-│           ├── mysql-secret.yaml
-│           ├── mysql-pvc.yaml
-│           ├── mysql-deployment.yaml
-│           ├── mysql-service.yaml
-│           ├── app-configmap.yaml
-│           ├── app-deployment.yaml
-│           ├── app-service.yaml
-│           ├── web-configmap.yaml
-│           ├── web-deployment.yaml
-│           ├── web-service.yaml
-│           ├── memcached-deployment.yaml   # disabled by default
-│           ├── memcached-service.yaml      # disabled by default
-│           ├── rabbitmq-deployment.yaml    # disabled by default
-│           ├── rabbitmq-service.yaml       # disabled by default
-│           └── ingress.yaml
-└── scripts/
-    ├── minikube-up.sh
-    ├── deploy.sh
-    └── teardown.sh
+├── .github/
+│   ├── workflows/ci.yml            # shellcheck, helm lint, kubeconform (dev, prod, rabbitmq off)
+│   └── dependabot.yml              # weekly updates for GitHub Actions
+├── charts/selfapp/
+│   ├── Chart.yaml
+│   ├── .helmignore                 # keeps *.secrets.yaml out of helm package
+│   ├── values.yaml                 # shared defaults
+│   ├── values-dev.yaml             # dev: local :dev images, 1 replica
+│   ├── values-prod.yaml            # prod: pinned :v1, 2 replicas, more resources
+│   └── templates/
+│       ├── _helpers.tpl            # name and label helpers
+│       ├── NOTES.txt               # printed after install
+│       ├── mysql-secret.yaml       mysql-pvc.yaml      mysql-deployment.yaml   mysql-service.yaml
+│       ├── app-configmap.yaml      app-deployment.yaml app-service.yaml
+│       ├── web-configmap.yaml      web-deployment.yaml web-service.yaml
+│       ├── rabbitmq-secret.yaml    rabbitmq-deployment.yaml rabbitmq-service.yaml
+│       └── ingress.yaml
+├── scripts/
+│   ├── minikube-up.sh              # start Minikube + ingress addon
+│   ├── deploy.sh                   # build images, generate passwords, helm upgrade --install
+│   └── teardown.sh                 # uninstall (keeps data) or --purge
+├── LICENSE
+└── README.md
 ```
 
-## Known gaps
+## Related projects
 
-- The `wait-for-mysql` init container does a blunt TCP poll (`nc -z`), not an actual "can I authenticate and query" check. Good enough for a lab, not a real readiness guarantee.
-- No CI: correctness is checked with `helm lint` / `helm template` and manual review, not an automated pipeline.
-- No resource-level NetworkPolicies — every component can currently talk to every other component inside the namespace, which is fine for a lab but not how you'd scope things in a real cluster.
-- No Kubernetes Secret encryption at rest configured — Minikube's default etcd storage is unencrypted, same caveat as any local cluster.
-- This is one Helm chart, not yet split into a library chart / subcharts pattern — fine at this size, would need restructuring if this grew into a larger multi-service system.
+Part of the selfapp series:
 
-## What it replaces
+- [`docker-buildlab-selfapp`](https://github.com/alexiglesias/docker-buildlab-selfapp):
+  the app itself, its Dockerfiles and the Docker Compose stack this chart is based on
+- [`cicd-github-actions-selfapp`](https://github.com/alexiglesias/cicd-github-actions-selfapp):
+  CI/CD pipeline that tests, builds, scans and deploys the images
+- [`observability-selfapp`](https://github.com/alexiglesias/observability-selfapp):
+  Prometheus, Grafana, Loki and Slack alerts for this app
 
-This project's whole point is proving these Kubernetes/Helm concepts hold up without any cloud spend: AWS EKS costs roughly $0.10/hour (~€72/month for the control plane alone, before any worker nodes), and Kops-provisioned clusters incur their own EC2 costs. Minikube runs the same Kubernetes API surface, for free, on your own laptop.
+## License
+
+[MIT](./LICENSE)
