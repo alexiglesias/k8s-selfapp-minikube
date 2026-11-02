@@ -236,6 +236,8 @@ Problems I actually hit while building this, and their fixes:
 | Logged out when adding a user in prod | Login sessions live in each app pod's memory. With 2 replicas, requests must keep reaching the same pod: the chart sets an Ingress cookie and `sessionAffinity: ClientIP` |
 | `selfapp.dev.local` doesn't load on macOS | Minikube's IP isn't reachable from the Mac with the Docker driver. Run `minikube tunnel` and use `127.0.0.1` in `/etc/hosts` |
 | Replica count doesn't change after `helm upgrade` | A manual `kubectl scale` took over the field. Change it through the values file instead, or scale back by hand once |
+| `helm upgrade` or `helm rollback` fails with `conflict with "kubectl-patch"` (or `"kubectl"`) | Helm 4 uses server-side apply, which tracks who owns each field. A manual `kubectl patch`/`scale` made kubectl the owner, so Helm refuses to overwrite it. Fix once, on purpose: re-run the same `helm upgrade` with `--force-conflicts`. Avoid it by never editing Helm-managed objects by hand |
+| `prod.secrets.yaml` (or `dev.secrets.yaml`) is lost | The passwords are still in the cluster: `kubectl -n selfapp-prod get secret selfapp-mysql-secret -o jsonpath='{.data.MYSQL_PASSWORD}' \| base64 -d` (same for `MYSQL_ROOT_PASSWORD` and `selfapp-rabbitmq-secret`/`RABBITMQ_DEFAULT_PASS`). Rebuild the file with them; don't let `deploy.sh` generate new ones, MySQL keeps the original |
 
 **After restarting your computer:** start Docker Desktop, run `minikube start`, wait for
 the pods with `kubectl get pods -n selfapp-dev -w`, then start `minikube tunnel` again.
@@ -305,8 +307,9 @@ Part of the selfapp series:
 
 - [`docker-buildlab-selfapp`](https://github.com/alexiglesias/docker-buildlab-selfapp):
   the app itself, its Dockerfiles and the Docker Compose stack this chart is based on
-- [`cicd-github-actions-selfapp`](https://github.com/alexiglesias/cicd-github-actions-selfapp):
-  CI/CD pipeline that tests, builds, scans and deploys the images
+- [CI/CD pipeline](https://github.com/alexiglesias/docker-buildlab-selfapp/tree/main/.github/workflows)
+  in docker-buildlab-selfapp: tests, builds and scans the images, and its `cd.yml` deploys
+  them to Minikube with this chart
 - [`observability-selfapp`](https://github.com/alexiglesias/observability-selfapp):
   Prometheus, Grafana, Loki and Slack alerts for this app
 
